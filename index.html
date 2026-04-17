@@ -1,0 +1,545 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ElectroBotics — Face Controller</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js" crossorigin="anonymous"></script>
+<style>
+  :root{--bg:#061f22;--surface:#0a373a;--surface-raised:#0f4a4e;--border:#1a5f64;--text:#f0f7f8;--text-dim:#7fa8ac;--accent:#008fa0;--accent-glow:#008fa080;--green:#8ab600;--green-glow:#8ab60050;--red:#d76241;--red-glow:#d7624150;--amber:#eab43a;--amber-glow:#eab43a50;--font-mono:'JetBrains Mono',monospace;--font-body:'DM Sans',sans-serif;--radius:12px}
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{background:var(--bg);color:var(--text);font-family:var(--font-body);min-height:100vh;overflow-x:hidden}
+  body::before{content:'';position:fixed;inset:0;background-image:radial-gradient(circle at 20% 30%,#008fa012 0%,transparent 50%),radial-gradient(circle at 80% 70%,#eab43a08 0%,transparent 50%),linear-gradient(rgba(0,143,160,.04) 1px,transparent 1px),linear-gradient(90deg,rgba(0,143,160,.04) 1px,transparent 1px);background-size:100% 100%,100% 100%,40px 40px,40px 40px;pointer-events:none;z-index:0}
+  .app{position:relative;z-index:1;max-width:800px;margin:0 auto;padding:24px 20px 40px}
+
+  .header{display:flex;align-items:center;justify-content:center;gap:16px;margin-bottom:20px;padding:18px 24px;background:#fff;border-radius:16px;box-shadow:0 4px 24px rgba(0,143,160,.15)}
+  .logo{width:64px;height:64px;flex-shrink:0}
+  .logo img{width:100%;height:100%;object-fit:contain;display:block}
+  .header-text{display:flex;flex-direction:column;justify-content:center}
+  .brand-name{height:32px;width:auto;object-fit:contain;object-position:left center;display:block;margin-bottom:4px;margin-left:-5px}
+  .brand-tagline{font-family:var(--font-mono);font-size:11px;font-weight:600;color:var(--accent);letter-spacing:2px;text-transform:uppercase;margin-bottom:-13px}
+
+  .toolbar-row{display:flex;gap:10px;margin-bottom:12px}
+  .toolbar-row>*{flex:1}
+  .btn{font-family:var(--font-mono);font-weight:600;font-size:13px;border:none;cursor:pointer;border-radius:10px;padding:10px 16px;transition:all .25s;display:inline-flex;align-items:center;justify-content:center;gap:8px}
+  .btn-connect{background:linear-gradient(135deg,var(--accent),#00b5c9);color:#fff;box-shadow:0 4px 16px var(--accent-glow)}
+  .btn-connect:hover{transform:translateY(-1px);box-shadow:0 6px 24px var(--accent-glow)}
+  .btn-disconnect{background:var(--surface-raised);color:var(--red);border:1px solid #d7624140}
+  .btn-disconnect:hover{background:#d7624120;border-color:var(--red)}
+  .btn-connect .status-inline{display:inline-flex;align-items:center;gap:6px}
+  .btn-connect .status-dot-inline{width:8px;height:8px;border-radius:50%;background:var(--green);animation:pulse 2s infinite}
+  @keyframes pulse{0%,100%{box-shadow:0 0 6px var(--green-glow)}50%{box-shadow:0 0 12px var(--green-glow)}}
+
+  .btn-start{background:linear-gradient(135deg,var(--green),#a0d800);color:#0a373a;box-shadow:0 4px 16px var(--green-glow)}
+  .btn-start:hover{transform:translateY(-1px)}
+  .btn-start:disabled{opacity:.3;cursor:not-allowed;transform:none}
+  .btn-stop{background:var(--red);color:#fff;box-shadow:0 4px 16px var(--red-glow)}
+  .btn-stop:hover{transform:translateY(-1px)}
+
+  .panel{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden}
+  .panel-header{display:flex;align-items:center;justify-content:space-between;padding:10px 18px;border-bottom:1px solid var(--border)}
+  .panel-title{font-family:var(--font-mono);font-size:13px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;display:flex;align-items:center;gap:8px}
+  .panel-title .icon{width:18px;height:18px;opacity:.6}
+
+  .cam-header-controls{display:flex;gap:6px}
+  .btn-cam{background:var(--surface-raised);border:1px solid var(--border);color:var(--text);cursor:pointer;padding:5px 10px;border-radius:8px;font-family:var(--font-mono);font-size:11px;font-weight:600;display:inline-flex;align-items:center;gap:4px;transition:all .2s}
+  .btn-cam:hover:not(:disabled){border-color:var(--accent);background:#008fa015}
+  .btn-cam:disabled{opacity:.3;cursor:not-allowed}
+  .btn-cam.active{background:var(--red);border-color:var(--red);color:#fff}
+  .btn-cam svg{width:14px;height:14px}
+
+  .camera-area{padding:12px;display:flex;flex-direction:column;align-items:center;gap:0}
+  .camera-wrapper{position:relative;width:100%;max-width:640px}
+  .camera-container{position:relative;width:100%;aspect-ratio:4/3;background:#000;border-radius:12px;overflow:hidden;border:2px solid var(--border)}
+  .camera-container video{position:absolute;width:100%;height:100%;object-fit:cover;display:block;transform:scaleX(-1)}
+  .camera-container canvas{position:absolute;width:100%;height:100%;object-fit:cover;display:block;transform:scaleX(-1)}
+  .camera-overlay{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:var(--surface);z-index:2;flex-direction:column;gap:12px}
+  .camera-overlay.hidden{display:none}
+  .camera-overlay svg{width:48px;height:48px;color:var(--text-dim)}
+  .camera-overlay span{font-family:var(--font-mono);font-size:12px;color:var(--text-dim);text-align:center;padding:0 20px}
+
+  /* Expression display — overlaid on camera */
+  .expr-display{position:absolute;bottom:10px;left:10px;right:10px;z-index:3;pointer-events:none}
+  .expr-card{display:flex;align-items:center;justify-content:space-between;padding:14px 18px;background:rgba(10,55,58,0.88);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);border:2px solid var(--border);border-radius:12px;transition:all .3s;min-height:60px;pointer-events:auto}
+  .expr-card.active{border-color:var(--green);box-shadow:0 0 24px var(--green-glow)}
+  .expr-card.sensing{border-color:var(--amber);box-shadow:0 0 16px var(--amber-glow)}
+  .expr-state{font-family:var(--font-mono);font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:1.5px;color:var(--text-dim);transition:color .3s}
+  .expr-card.active .expr-state{color:var(--green)}
+  .expr-name{font-family:var(--font-mono);font-size:22px;font-weight:700;color:var(--text-dim);transition:color .3s;margin-top:2px}
+  .expr-card.active .expr-name{color:var(--green)}
+
+  /* Expression indicators — small badges row */
+  .expr-badges{position:absolute;top:10px;left:10px;right:10px;z-index:3;display:flex;flex-wrap:wrap;gap:6px;pointer-events:none}
+  .expr-badge{font-family:var(--font-mono);font-size:10px;font-weight:700;padding:4px 10px;border-radius:8px;background:rgba(10,55,58,0.7);backdrop-filter:blur(4px);color:var(--text-dim);border:1px solid var(--border);transition:all .2s;text-transform:uppercase;letter-spacing:0.5px}
+  .expr-badge.on{background:rgba(138,182,0,0.25);color:var(--green);border-color:var(--green)}
+
+  /* Log */
+  .toggle-row{display:flex;gap:10px;margin-top:20px;margin-bottom:4px}
+  .btn-toggle{flex:1;display:flex;align-items:center;justify-content:center;gap:8px;padding:11px 16px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);color:var(--text-dim);font-family:var(--font-mono);font-size:12px;font-weight:600;cursor:pointer;transition:all .25s;user-select:none}
+  .btn-toggle:hover{border-color:var(--accent);color:var(--text)}
+  .btn-toggle.open{border-color:var(--accent);color:var(--accent);border-bottom-left-radius:0;border-bottom-right-radius:0;border-bottom-color:transparent;margin-bottom:0}
+  .toggle-badge{background:var(--accent);color:#fff;font-size:10px;font-weight:700;padding:1px 6px;border-radius:8px;min-width:18px;text-align:center;display:none}
+  .toggle-badge.visible{display:inline-block}
+  .toggle-chevron{transition:transform .25s;margin-left:auto}
+  .btn-toggle.open .toggle-chevron{transform:rotate(180deg)}
+  .collapsible-panel{border-top-left-radius:0;border-top-right-radius:0;margin-top:0;animation:slide .25s ease-out}
+  @keyframes slide{from{opacity:0;transform:translateY(-8px)}to{opacity:1;transform:translateY(0)}}
+  .console{height:200px;overflow-y:auto;padding:14px 18px;font-family:var(--font-mono);font-size:12.5px;line-height:1.8;scroll-behavior:smooth}
+  .console::-webkit-scrollbar{width:6px}.console::-webkit-scrollbar-track{background:transparent}.console::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
+  .console-line{display:flex;gap:10px;animation:linein .2s ease-out}
+  @keyframes linein{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}
+  .console-time{color:var(--text-dim);flex-shrink:0;user-select:none}
+  .console-dir{font-weight:600;flex-shrink:0;user-select:none}
+  .console-dir.tx{color:var(--accent)}.console-dir.rx{color:var(--green)}.console-dir.sys{color:var(--amber)}
+  .console-msg{color:var(--text);word-break:break-all}
+  .console-empty{color:var(--text-dim);text-align:center;padding:60px 0;font-size:13px}
+  .console-toolbar{display:flex;gap:8px}
+  .panel-badge{font-family:var(--font-mono);font-size:11px;color:var(--text-dim);background:var(--surface-raised);padding:3px 8px;border-radius:6px}
+  .btn-icon{background:none;border:1px solid transparent;color:var(--text-dim);cursor:pointer;padding:4px;border-radius:6px;display:flex;align-items:center;justify-content:center;transition:all .2s}
+  .btn-icon:hover{color:var(--text);border-color:var(--border);background:var(--surface-raised)}
+  .btn-icon svg{width:16px;height:16px}
+  .footer{text-align:center;margin-top:32px;font-size:12px;color:var(--text-dim);font-family:var(--font-mono)}
+
+  @media(max-width:600px){
+    .app{padding:12px 10px 32px}.header{padding:14px 16px;gap:14px}.logo{width:52px;height:52px}.brand-name{height:26px}.brand-tagline{font-size:10px;letter-spacing:1.5px}
+    .camera-wrapper{max-width:100%}.camera-container{aspect-ratio:3/4}
+    .expr-name{font-size:18px}
+    .camera-area{padding:8px}
+    .expr-badges{gap:4px}.expr-badge{font-size:9px;padding:3px 7px}
+  }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <div class="header">
+    <div class="logo"><img src="logo-on.png" alt="ElectroBotics" onerror="this.style.display='none'"></div>
+    <div class="header-text">
+      <img src="ElectroBotics_No_Makerspace.png" alt="ElectroBotics" class="brand-name" onerror="this.style.display='none';this.nextElementSibling.style.display='block';">
+      <div style="display:none;font-family:var(--font-body);font-size:24px;font-weight:700;color:var(--text);margin-bottom:4px;">Electro<span style="color:var(--red);font-style:italic;">Botics</span></div>
+      <div class="brand-tagline">Face <span style="color:var(--accent);">Controller</span></div>
+    </div>
+  </div>
+
+  <div class="toolbar-row">
+    <button class="btn btn-start" id="startBtn" onclick="startAll()">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+      Start Camera
+    </button>
+    <button class="btn btn-connect" id="connectBtn" onclick="toggleConnection()">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M6.5 6.5l11 11M17.5 6.5v11h-11"/></svg>
+      Connect
+    </button>
+  </div>
+
+  <div class="panel">
+    <div class="panel-header">
+      <div class="panel-title">
+        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+        Face Detection
+      </div>
+      <div class="cam-header-controls">
+        <button class="btn-cam" id="flipBtn" onclick="flipCamera()" title="Switch camera">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 4v6h6"/><path d="M23 20v-6h-6"/><path d="M20.49 9A9 9 0 005.64 5.64L1 10M23 14l-4.64 4.36A9 9 0 013.51 15"/></svg>
+          Flip
+        </button>
+      </div>
+    </div>
+
+    <div class="camera-area">
+      <div class="camera-wrapper">
+        <div class="camera-container">
+          <video id="video" autoplay playsinline muted></video>
+          <canvas id="canvas"></canvas>
+          <div class="camera-overlay" id="cameraOverlay">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+            <span>Tap "Start Camera" to begin face detection</span>
+          </div>
+        </div>
+
+        <!-- Expression badges at top of camera -->
+        <div class="expr-badges" id="exprBadges">
+          <div class="expr-badge" id="badge-mouth">Mouth</div>
+          <div class="expr-badge" id="badge-head_left">H-Left</div>
+          <div class="expr-badge" id="badge-head_right">H-Right</div>
+          <div class="expr-badge" id="badge-head_up">H-Up</div>
+          <div class="expr-badge" id="badge-head_down">H-Down</div>
+        </div>
+
+        <!-- Main expression overlay -->
+        <div class="expr-display">
+          <div class="expr-card" id="exprCard">
+            <div>
+              <div class="expr-state" id="exprState">Waiting…</div>
+              <div class="expr-name" id="exprName">—</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="toggle-row">
+    <button class="btn-toggle" id="toggleLog" onclick="togglePanel('log')">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+      Log
+      <span class="toggle-badge" id="logBadge">0</span>
+      <svg class="toggle-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+    </button>
+  </div>
+
+  <div class="panel collapsible-panel" id="logPanel" style="display:none;">
+    <div class="panel-header">
+      <div class="panel-title"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>Log</div>
+      <div class="console-toolbar">
+        <span class="panel-badge" id="msgCount">0 messages</span>
+        <button class="btn-icon" onclick="clearLog()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M5 6v14a2 2 0 002 2h10a2 2 0 002-2V6"/></svg></button>
+      </div>
+    </div>
+    <div class="console" id="logConsole"><div class="console-empty">No log entries yet</div></div>
+  </div>
+
+  <div class="footer">Built by <strong style="color:var(--accent);">ElectroBotics</strong> · Works in Chrome &amp; Edge</div>
+</div>
+
+<script>
+// ─── BLE ─────────────────────────────────────────
+const UART_SVC='6e400001-b5a3-f393-e0a9-e50e24dcca9e';
+const MB_SVCS=[UART_SVC,'e95d93af-251d-470a-a062-fa1922dfa9a8','e95d0753-251d-470a-a062-fa1922dfa9a8','e95d6100-251d-470a-a062-fa1922dfa9a8','e95dd91d-251d-470a-a062-fa1922dfa9a8','e95d9882-251d-470a-a062-fa1922dfa9a8','e95dd822-251d-470a-a062-fa1922dfa9a8','e95df2d8-251d-470a-a062-fa1922dfa9a8'];
+let bleDevice=null,txChar=null,rxChar=null,logCount=0;
+
+async function toggleConnection(){if(bleDevice&&bleDevice.gatt.connected)bleDevice.gatt.disconnect();else await connectBLE()}
+async function connectBLE(){
+  try{
+    updateBLE('scanning');log('sys','Scanning…');
+    bleDevice=await navigator.bluetooth.requestDevice({filters:[{namePrefix:'BBC micro:bit'}],optionalServices:MB_SVCS});
+    bleDevice.addEventListener('gattserverdisconnected',()=>{log('sys','Disconnected.');updateBLE('disconnected');txChar=null;rxChar=null});
+    updateBLE('connecting');log('sys','Connecting to '+bleDevice.name+'…');
+    const srv=await bleDevice.gatt.connect();
+    let svc;try{svc=await srv.getPrimaryService(UART_SVC)}catch(e){log('sys','⚠ UART not found.');updateBLE('disconnected');bleDevice.gatt.disconnect();return}
+    const ch=await svc.getCharacteristics();
+    for(const c of ch){if(c.properties.write||c.properties.writeWithoutResponse)txChar=c;if(c.properties.notify||c.properties.indicate)rxChar=c}
+    if(rxChar){await rxChar.startNotifications();rxChar.addEventListener('characteristicvaluechanged',e=>{const d=new TextDecoder().decode(e.target.value).replace(/[\r\n]/g,'');if(d)log('rx',d)})}
+    updateBLE('connected',bleDevice.name);log('sys','✓ Connected.');
+  }catch(e){if(e.name!=='NotFoundError')log('sys','Error: '+e.message);updateBLE('disconnected')}
+}
+async function sendBLE(t){
+  if(!txChar)return;
+  try{const enc=new TextEncoder().encode(t+'\n');for(let i=0;i<enc.length;i+=20){const c=enc.slice(i,i+20);txChar.properties.writeWithoutResponse?await txChar.writeValueWithoutResponse(c):await txChar.writeValueWithResponse(c)}log('tx',t)}
+  catch(e){log('sys','Send err: '+e.message)}
+}
+function updateBLE(s,name){
+  const btn=document.getElementById('connectBtn');
+  if(s==='connected'){btn.className='btn btn-disconnect';btn.innerHTML='<span class="status-inline"><span class="status-dot-inline"></span>'+name+'</span> <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>'}
+  else if(s==='scanning'||s==='connecting'){btn.className='btn btn-connect';btn.style.opacity='.7';btn.innerHTML='<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M6.5 6.5l11 11M17.5 6.5v11h-11"/></svg> '+(s==='scanning'?'Scanning…':'Connecting…')}
+  else{btn.className='btn btn-connect';btn.style.opacity='1';btn.innerHTML='<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M6.5 6.5l11 11M17.5 6.5v11h-11"/></svg> Connect'}
+}
+
+// ─── Face Mesh ───────────────────────────────────
+let faceMesh=null, camRunning=false, useFrontCamera=true, lastSentExpr=null;
+let mpCamera=null;
+
+// Landmark indices — using multiple points for better accuracy
+// Lips
+const UPPER_LIP_TOP=13, LOWER_LIP_BOTTOM=14;
+const UPPER_LIP_INNER=82, LOWER_LIP_INNER=87;
+// Eyes — using multiple points for proper EAR (Eye Aspect Ratio)
+const L_EYE_P1=33, L_EYE_P2=160, L_EYE_P3=158, L_EYE_P4=133, L_EYE_P5=153, L_EYE_P6=144;
+const R_EYE_P1=362, R_EYE_P2=385, R_EYE_P3=387, R_EYE_P4=263, R_EYE_P5=373, R_EYE_P6=380;
+// Eyebrows
+const L_BROW_INNER=105, L_BROW_OUTER=70;
+const R_BROW_INNER=334, R_BROW_OUTER=300;
+const L_EYE_TOP=159, R_EYE_TOP=386;
+// Face structure
+const NOSE_TIP=4, NOSE_BRIDGE=6;
+const LEFT_MOUTH=61, RIGHT_MOUTH=291;
+const CHIN=152, FOREHEAD=10;
+const LEFT_CHEEK=234, RIGHT_CHEEK=454;
+const LEFT_TEMPLE=127, RIGHT_TEMPLE=356;
+
+function dist2d(a,b){return Math.sqrt((a.x-b.x)**2+(a.y-b.y)**2)}
+function dist3d(a,b){return Math.sqrt((a.x-b.x)**2+(a.y-b.y)**2+(a.z-b.z)**2)}
+
+// Eye Aspect Ratio — more accurate than simple top-bottom distance
+function eyeAR(lm,p1,p2,p3,p4,p5,p6){
+  const v1=dist2d(lm[p2],lm[p6]);
+  const v2=dist2d(lm[p3],lm[p5]);
+  const h=dist2d(lm[p1],lm[p4]);
+  return(v1+v2)/(2*h);
+}
+
+function analyzeExpression(landmarks){
+  const lm=landmarks;
+  const faceH=dist2d(lm[FOREHEAD],lm[CHIN]);
+  if(faceH<0.01)return{}; // face too small
+
+  // Mouth open: inner lip distance
+  const mouthGap=dist2d(lm[UPPER_LIP_TOP],lm[LOWER_LIP_BOTTOM])/faceH;
+
+  // Eye aspect ratios (higher = more open, lower = more closed)
+  const leftEAR=eyeAR(lm,L_EYE_P1,L_EYE_P2,L_EYE_P3,L_EYE_P4,L_EYE_P5,L_EYE_P6);
+  const rightEAR=eyeAR(lm,R_EYE_P1,R_EYE_P2,R_EYE_P3,R_EYE_P4,R_EYE_P5,R_EYE_P6);
+
+  // Eyebrow raise: average brow-to-eye distance
+  const lBrow=(dist2d(lm[L_BROW_INNER],lm[L_EYE_TOP])+dist2d(lm[L_BROW_OUTER],lm[L_EYE_TOP]))/2/faceH;
+  const rBrow=(dist2d(lm[R_BROW_INNER],lm[R_EYE_TOP])+dist2d(lm[R_BROW_OUTER],lm[R_EYE_TOP]))/2/faceH;
+  const browRaise=(lBrow+rBrow)/2;
+
+  // Smile: mouth width relative to face width
+  const faceW=dist2d(lm[LEFT_TEMPLE],lm[RIGHT_TEMPLE]);
+  const mouthWidth=dist2d(lm[LEFT_MOUTH],lm[RIGHT_MOUTH])/faceW;
+
+  // Head turn (left/right): use nose tip relative to face center
+  // Since camera is mirrored, we need to flip: positive x = user's left
+  const faceCX=(lm[LEFT_CHEEK].x+lm[RIGHT_CHEEK].x)/2;
+  const headTurnX=(lm[NOSE_TIP].x-faceCX)/faceH;
+
+  // Head tilt (up/down): use nose bridge angle relative to vertical
+  // When looking up: nose tip moves up relative to nose bridge
+  // When looking down: nose tip moves down
+  const noseVecY=lm[NOSE_TIP].y-lm[NOSE_BRIDGE].y;
+  const noseVecNorm=noseVecY/faceH;
+  // Also use z-depth: when looking up, nose tip z increases; down, it decreases
+  const noseTiltZ=lm[NOSE_TIP].z-lm[FOREHEAD].z;
+
+  const expressions={};
+
+  // Mouth: separate open and close thresholds
+  // Mouth: open = jaw dropped wide, close = lips pressed together tightly
+  expressions.mouth_open=mouthGap>0.07;
+  expressions.mouth_close=mouthGap<0.008; // very tight threshold — only deliberate lip press
+
+  // Eyes closed: swap left/right to match mirrored user perspective
+  expressions.left_eye_closed=rightEAR<0.18;   // camera's right = user's left
+  expressions.right_eye_closed=leftEAR<0.18;   // camera's left = user's right
+
+  // Head turn: swap for mirrored view (user's left = camera's right)
+  expressions.head_left=headTurnX<-0.15;
+  expressions.head_right=headTurnX>0.15;
+
+  // Head up/down: use ratio of forehead-to-nose vs nose-to-chin distances
+  const foreheadToNose=dist2d(lm[FOREHEAD],lm[NOSE_TIP]);
+  const noseToChin=dist2d(lm[NOSE_TIP],lm[CHIN]);
+  const verticalRatio=foreheadToNose/noseToChin;
+  expressions.head_up=verticalRatio<0.75;
+  expressions.head_down=verticalRatio>1.15;
+
+  return expressions;
+}
+
+function getExpressionName(expr){
+  if(!expr||Object.keys(expr).length===0)return 'neutral';
+
+  // Priority: head movements first, then mouth (deliberate actions only)
+  if(expr.head_left) return 'head_left';
+  if(expr.head_right) return 'head_right';
+  if(expr.head_up) return 'head_up';
+  if(expr.head_down) return 'head_down';
+  if(expr.mouth_open) return 'mouth_open';
+  if(expr.mouth_close) return 'mouth_close';
+  return 'neutral';
+}
+
+// Badge key mapping
+const BADGE_MAP={
+  'mouth_open':'mouth', 'mouth_close':'mouth',
+  'head_left':'head_left', 'head_right':'head_right',
+  'head_up':'head_up', 'head_down':'head_down'
+};
+
+// Stabilization
+let candidateExpr=null, candidateStart=0, exprSent=false, lowFaceCount=0;
+const HOLD_TIME=500;
+
+function onResults(results){
+  const canvas=document.getElementById('canvas');
+  const ctx=canvas.getContext('2d');
+  const video=document.getElementById('video');
+
+  canvas.width=video.videoWidth||640;
+  canvas.height=video.videoHeight||480;
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+
+  if(results.multiFaceLandmarks&&results.multiFaceLandmarks.length>0){
+    const landmarks=results.multiFaceLandmarks[0];
+
+    // Draw face mesh — landmarks are already in mirrored space
+    // since video is CSS-mirrored, draw mesh directly (no JS mirror)
+    ctx.strokeStyle='rgba(0,143,160,0.25)';
+    ctx.lineWidth=0.5;
+    for(const conn of FACEMESH_TESSELATION){
+      const a=landmarks[conn[0]],b=landmarks[conn[1]];
+      ctx.beginPath();
+      ctx.moveTo(a.x*canvas.width,a.y*canvas.height);
+      ctx.lineTo(b.x*canvas.width,b.y*canvas.height);
+      ctx.stroke();
+    }
+
+    // Draw key points brighter for eyes and mouth
+    ctx.fillStyle='rgba(138,182,0,0.6)';
+    const keyPoints=[L_EYE_P1,L_EYE_P2,L_EYE_P3,L_EYE_P4,L_EYE_P5,L_EYE_P6,
+                     R_EYE_P1,R_EYE_P2,R_EYE_P3,R_EYE_P4,R_EYE_P5,R_EYE_P6,
+                     UPPER_LIP_TOP,LOWER_LIP_BOTTOM,LEFT_MOUTH,RIGHT_MOUTH,NOSE_TIP];
+    for(const idx of keyPoints){
+      const p=landmarks[idx];
+      ctx.beginPath();
+      ctx.arc(p.x*canvas.width,p.y*canvas.height,2,0,Math.PI*2);
+      ctx.fill();
+    }
+
+    // Analyze expression
+    const expr=analyzeExpression(landmarks);
+    const exprName=getExpressionName(expr);
+
+    // Update badges
+    document.querySelectorAll('.expr-badge').forEach(b=>b.classList.remove('on'));
+    for(const key of Object.keys(expr)){
+      if(expr[key]){
+        const badgeKey=BADGE_MAP[key]||key;
+        const badge=document.getElementById('badge-'+badgeKey);
+        if(badge)badge.classList.add('on');
+      }
+    }
+
+    // Stabilization + auto-send
+    if(exprName!=='neutral'){
+      if(exprName!==candidateExpr){
+        candidateExpr=exprName;
+        candidateStart=Date.now();
+        exprSent=false;
+        setExprCard('sensing',exprName);
+      }else if(!exprSent&&Date.now()-candidateStart>=HOLD_TIME){
+        exprSent=true;
+        setExprCard('active',exprName);
+        if(txChar)sendBLE(exprName);
+      }else if(exprSent){
+        setExprCard('active',exprName);
+      }else{
+        setExprCard('sensing',exprName);
+      }
+      lowFaceCount=0;
+    }else{
+      lowFaceCount++;
+      if(lowFaceCount>10){
+        if(candidateExpr!==null&&candidateExpr!=='neutral'){
+          if(exprSent&&txChar){sendBLE('neutral')}
+          candidateExpr=null;candidateStart=0;exprSent=false;
+        }
+        setExprCard('waiting','neutral');
+        lowFaceCount=0;
+        document.querySelectorAll('.expr-badge').forEach(b=>b.classList.remove('on'));
+      }
+    }
+  }else{
+    setExprCard('waiting','no face');
+    document.querySelectorAll('.expr-badge').forEach(b=>b.classList.remove('on'));
+    candidateExpr=null;exprSent=false;lowFaceCount=0;
+  }
+}
+
+function setExprCard(state,name){
+  const card=document.getElementById('exprCard');
+  card.classList.remove('active','sensing');
+  if(state==='active')card.classList.add('active');
+  if(state==='sensing')card.classList.add('sensing');
+  document.getElementById('exprState').textContent={waiting:'Waiting…',sensing:'Sensing…',active:'● Locked'}[state]||'Waiting…';
+  const display=name.replace(/_/g,' ');
+  document.getElementById('exprName').textContent=display;
+}
+
+// ─── Camera ──────────────────────────────────────
+async function startAll(){
+  if(camRunning){stopCam();return}
+  log('sys','Initializing Face Mesh…');
+
+  try{
+    // Initialize FaceMesh
+    faceMesh=new FaceMesh({locateFile:f=>'https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/'+f});
+    faceMesh.setOptions({maxNumFaces:1,refineLandmarks:true,minDetectionConfidence:0.5,minTrackingConfidence:0.5});
+    faceMesh.onResults(onResults);
+
+    const video=document.getElementById('video');
+
+    // Get camera stream
+    let stream;
+    const facing=useFrontCamera?'user':{exact:'environment'};
+    try{
+      stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:facing,width:{ideal:640},height:{ideal:480}},audio:false});
+    }catch(e){
+      log('sys','FacingMode failed, using default…');
+      try{stream=await navigator.mediaDevices.getUserMedia({video:true,audio:false})}
+      catch(e2){log('sys','Camera error: '+e2.message);return}
+    }
+
+    video.srcObject=stream;
+    await new Promise((res,rej)=>{
+      video.onloadedmetadata=()=>video.play().then(res).catch(rej);
+      setTimeout(()=>rej(new Error('Timeout')),8000);
+    });
+
+    document.getElementById('cameraOverlay').classList.add('hidden');
+    camRunning=true;
+
+    const btn=document.getElementById('startBtn');
+    btn.className='btn btn-stop';
+    btn.innerHTML='<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="6" y="6" width="12" height="12" rx="2"/></svg> Stop Camera';
+
+    log('sys','Camera started ('+(useFrontCamera?'front':'rear')+').');
+    log('sys','Face Mesh loaded. Detecting expressions…');
+
+    // Send frames to FaceMesh
+    async function processFrame(){
+      if(!camRunning)return;
+      if(video.readyState>=2){
+        await faceMesh.send({image:video});
+      }
+      requestAnimationFrame(processFrame);
+    }
+    processFrame();
+
+  }catch(e){
+    log('sys','Error: '+e.message);
+    camRunning=false;
+  }
+}
+
+function stopCam(){
+  camRunning=false;
+  const video=document.getElementById('video');
+  if(video.srcObject){video.srcObject.getTracks().forEach(t=>t.stop());video.srcObject=null}
+  const ctx=document.getElementById('canvas').getContext('2d');
+  ctx.clearRect(0,0,ctx.canvas.width,ctx.canvas.height);
+  document.getElementById('cameraOverlay').classList.remove('hidden');
+  document.querySelectorAll('.expr-badge').forEach(b=>b.classList.remove('on'));
+  setExprCard('waiting','—');
+  const btn=document.getElementById('startBtn');
+  btn.className='btn btn-start';
+  btn.innerHTML='<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="5 3 19 12 5 21 5 3"/></svg> Start Camera';
+  log('sys','Camera stopped.');
+}
+
+async function flipCamera(){
+  useFrontCamera=!useFrontCamera;
+  if(camRunning){stopCam();await new Promise(r=>setTimeout(r,500));await startAll()}
+  log('sys','Switched to '+(useFrontCamera?'front':'rear')+' camera.');
+}
+
+// ─── Log ─────────────────────────────────────────
+function log(dir,text){
+  const con=document.getElementById('logConsole'),em=con.querySelector('.console-empty');if(em)em.remove();
+  const ln=document.createElement('div');ln.className='console-line';
+  const now=new Date(),ts=now.toLocaleTimeString('en-GB',{hour12:false})+'.'+String(now.getMilliseconds()).padStart(3,'0');
+  ln.innerHTML='<span class="console-time">'+ts+'</span><span class="console-dir '+dir+'">'+{sys:'SYS ●',tx:'TX →',rx:'RX ←'}[dir]+'</span><span class="console-msg">'+esc(text)+'</span>';
+  con.appendChild(ln);logCount++;document.getElementById('msgCount').textContent=logCount+' message'+(logCount!==1?'s':'');updBadge();con.scrollTop=con.scrollHeight;
+}
+function clearLog(){document.getElementById('logConsole').innerHTML='<div class="console-empty">No log entries yet</div>';logCount=0;document.getElementById('msgCount').textContent='0 messages'}
+function togglePanel(n){const p=document.getElementById(n+'Panel'),b=document.getElementById('toggle'+n.charAt(0).toUpperCase()+n.slice(1));if(p.style.display==='none'){p.style.display='';b.classList.add('open');document.getElementById('logConsole').scrollTop=document.getElementById('logConsole').scrollHeight}else{p.style.display='none';b.classList.remove('open')}}
+function updBadge(){const b=document.getElementById('logBadge'),p=document.getElementById('logPanel');if(p.style.display==='none'&&logCount>0){b.textContent=logCount>99?'99+':logCount;b.classList.add('visible')}else b.classList.remove('visible')}
+function esc(t){const d=document.createElement('div');d.textContent=t;return d.innerHTML}
+
+if(!navigator.bluetooth){const w=document.createElement('div');w.style.cssText='padding:12px 18px;background:#d7624115;border:1px solid #d7624140;border-radius:12px;margin-bottom:12px;font-size:13px;color:var(--red);font-family:var(--font-mono);text-align:center';w.innerHTML='<strong>Web Bluetooth not supported.</strong> Use Chrome or Edge.';document.querySelector('.toolbar-row').after(w)}
+</script>
+</body>
+</html>
