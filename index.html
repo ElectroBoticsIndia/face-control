@@ -161,7 +161,8 @@
 
         <!-- Expression badges at top of camera -->
         <div class="expr-badges" id="exprBadges">
-          <div class="expr-badge" id="badge-mouth">Mouth</div>
+          <div class="expr-badge" id="badge-mouth_open">M-Open</div>
+          <div class="expr-badge" id="badge-mouth_close">M-Close</div>
           <div class="expr-badge" id="badge-head_left">H-Left</div>
           <div class="expr-badge" id="badge-head_right">H-Right</div>
           <div class="expr-badge" id="badge-head_up">H-Up</div>
@@ -316,15 +317,15 @@ function analyzeExpression(landmarks){
   expressions.right_eye_closed=leftEAR<0.18;   // camera's left = user's right
 
   // Head turn: swap for mirrored view (user's left = camera's right)
-  expressions.head_left=headTurnX<-0.15;
-  expressions.head_right=headTurnX>0.15;
+  expressions.head_left=headTurnX>0.15;
+  expressions.head_right=headTurnX<-0.15;
 
   // Head up/down: use ratio of forehead-to-nose vs nose-to-chin distances
   const foreheadToNose=dist2d(lm[FOREHEAD],lm[NOSE_TIP]);
   const noseToChin=dist2d(lm[NOSE_TIP],lm[CHIN]);
   const verticalRatio=foreheadToNose/noseToChin;
-  expressions.head_up=verticalRatio<0.75;
-  expressions.head_down=verticalRatio>1.15;
+  expressions.head_up=verticalRatio<0.68;
+  expressions.head_down=verticalRatio>1.35;
 
   return expressions;
 }
@@ -344,7 +345,7 @@ function getExpressionName(expr){
 
 // Badge key mapping
 const BADGE_MAP={
-  'mouth_open':'mouth', 'mouth_close':'mouth',
+  'mouth_open':'mouth_open', 'mouth_close':'mouth_close',
   'head_left':'head_left', 'head_right':'head_right',
   'head_up':'head_up', 'head_down':'head_down'
 };
@@ -367,7 +368,7 @@ function onResults(results){
 
     // Draw face mesh — landmarks are already in mirrored space
     // since video is CSS-mirrored, draw mesh directly (no JS mirror)
-    ctx.strokeStyle='rgba(0,143,160,0.25)';
+    ctx.strokeStyle='rgba(0,220,240,0.5)';
     ctx.lineWidth=0.5;
     for(const conn of FACEMESH_TESSELATION){
       const a=landmarks[conn[0]],b=landmarks[conn[1]];
@@ -377,8 +378,8 @@ function onResults(results){
       ctx.stroke();
     }
 
-    // Draw key points brighter for eyes and mouth
-    ctx.fillStyle='rgba(138,182,0,0.6)';
+    // Draw key points for eyes and mouth
+    ctx.fillStyle='rgba(0,220,240,0.8)';
     const keyPoints=[L_EYE_P1,L_EYE_P2,L_EYE_P3,L_EYE_P4,L_EYE_P5,L_EYE_P6,
                      R_EYE_P1,R_EYE_P2,R_EYE_P3,R_EYE_P4,R_EYE_P5,R_EYE_P6,
                      UPPER_LIP_TOP,LOWER_LIP_BOTTOM,LEFT_MOUTH,RIGHT_MOUTH,NOSE_TIP];
