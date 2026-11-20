@@ -70,6 +70,13 @@
   .expr-name{font-family:var(--font-mono);font-size:22px;font-weight:700;color:var(--text-dim);transition:color .3s;margin-top:2px}
   .expr-card.active .expr-name{color:var(--green)}
 
+  /* Bluetooth tag chip — the exact text sent to the micro:bit */
+  .bt-tag{display:none;flex-direction:column;align-items:flex-end;gap:4px}
+  .bt-tag.show{display:flex}
+  .bt-tag-label{font-family:var(--font-mono);font-size:10px;font-weight:600;letter-spacing:1.5px;text-transform:uppercase;color:var(--text-dim)}
+  .bt-tag-value{font-family:var(--font-mono);font-size:16px;font-weight:700;padding:5px 12px;border-radius:8px;background:rgba(138,182,0,0.18);color:var(--green);border:1px solid var(--green);user-select:all}
+  .bt-tag.release .bt-tag-value{background:rgba(0,143,160,0.18);color:#00d4ea;border-color:var(--accent)}
+
   /* Expression indicators — small badges row */
   .expr-badges{position:absolute;top:10px;left:10px;right:10px;z-index:3;display:flex;flex-wrap:wrap;gap:6px;pointer-events:none}
   .expr-badge{font-family:var(--font-mono);font-size:10px;font-weight:700;padding:4px 10px;border-radius:8px;background:rgba(10,55,58,0.7);backdrop-filter:blur(4px);color:var(--text-dim);border:1px solid var(--border);transition:all .2s;text-transform:uppercase;letter-spacing:0.5px}
@@ -105,7 +112,7 @@
   @media(max-width:600px){
     .app{padding:12px 10px 32px}.header{padding:14px 16px;gap:14px}.logo{width:52px;height:52px}.brand-name{height:26px}.brand-tagline{font-size:10px;letter-spacing:1.5px}
     .camera-wrapper{max-width:100%}.camera-container{aspect-ratio:3/4}
-    .expr-name{font-size:18px}
+    .expr-name{font-size:18px}.bt-tag-value{font-size:13px;padding:4px 9px}
     .camera-area{padding:8px}
     .expr-badges{gap:4px}.expr-badge{font-size:9px;padding:3px 7px}
   }
@@ -179,6 +186,10 @@
             <div>
               <div class="expr-state" id="exprState">Waiting…</div>
               <div class="expr-name" id="exprName">—</div>
+            </div>
+            <div class="bt-tag" id="btTag">
+              <div class="bt-tag-label" id="btTagLabel">Bluetooth tag</div>
+              <div class="bt-tag-value" id="btTagValue"></div>
             </div>
           </div>
         </div>
@@ -516,7 +527,10 @@ function onResults(results){
     if(exprName!=='neutral'){
       if(exprName!==candidateExpr){
         // If we were locked on an eye-close and that eye has now opened, report it
-        if(exprSent&&txChar&&RELEASE_MSG[candidateExpr]&&expr[RELEASE_MSG[candidateExpr]])sendBLE(RELEASE_MSG[candidateExpr]);
+        if(exprSent&&RELEASE_MSG[candidateExpr]&&expr[RELEASE_MSG[candidateExpr]]){
+          if(txChar)sendBLE(RELEASE_MSG[candidateExpr]);
+        }
+        showTag(null); // new gesture being sensed — hide the old tag
         candidateExpr=exprName;
         candidateStart=Date.now();
         exprSent=false;
@@ -525,6 +539,7 @@ function onResults(results){
         exprSent=true;
         setExprCard('active',exprName);
         if(txChar)sendBLE(exprName);
+        showTag(exprName,'locked');
       }else if(exprSent){
         setExprCard('active',exprName);
       }else{
@@ -535,7 +550,11 @@ function onResults(results){
       lowFaceCount++;
       if(lowFaceCount>3){ // gestures are already debounced, so release quickly
         if(candidateExpr!==null&&candidateExpr!=='neutral'){
-          if(exprSent&&txChar){sendBLE(RELEASE_MSG[candidateExpr]||'neutral')}
+          if(exprSent){
+            const rel=RELEASE_MSG[candidateExpr]||'neutral';
+            if(txChar)sendBLE(rel);
+            showTag(rel,'release');
+          }
           candidateExpr=null;candidateStart=0;exprSent=false;
         }
         setExprCard('waiting','neutral');
@@ -545,9 +564,20 @@ function onResults(results){
   }else{
     setExprCard('waiting','no face');
     document.querySelectorAll('.expr-badge').forEach(b=>b.classList.remove('on'));
-    candidateExpr=null;exprSent=false;lowFaceCount=0;
+    candidateExpr=null;exprSent=false;lowFaceCount=0;showTag(null);
     resetGestures();
   }
+}
+
+// Show the Bluetooth tag the micro:bit receives (shown even when not connected,
+// so students can copy it into their MakeCode "on uart data received" blocks)
+function showTag(tag,kind){
+  const box=document.getElementById('btTag');
+  if(!tag){box.classList.remove('show','release');return}
+  document.getElementById('btTagValue').textContent=tag;
+  document.getElementById('btTagLabel').textContent=kind==='release'?'Released → sent':(txChar?'Sent to micro:bit':'Bluetooth tag');
+  box.classList.add('show');
+  box.classList.toggle('release',kind==='release');
 }
 
 function setExprCard(state,name){
@@ -626,6 +656,7 @@ function stopCam(){
   document.getElementById('cameraOverlay').classList.remove('hidden');
   document.querySelectorAll('.expr-badge').forEach(b=>b.classList.remove('on'));
   setExprCard('waiting','—');
+  showTag(null);
   const btn=document.getElementById('startBtn');
   btn.className='btn btn-start';
   btn.innerHTML='<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="5 3 19 12 5 21 5 3"/></svg> Start Camera';
