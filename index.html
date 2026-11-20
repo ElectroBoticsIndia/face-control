@@ -71,8 +71,13 @@
   .expr-card.active .expr-name{color:var(--green)}
 
   /* Bluetooth tag chip — the exact text sent to the micro:bit */
-  .bt-tag{display:none;flex-direction:column;align-items:flex-end;gap:4px}
-  .bt-tag.show{display:flex}
+  /* Space is always reserved (visibility, not display) so the card height never changes */
+  .bt-tag{display:flex;flex-direction:column;align-items:flex-end;gap:4px;visibility:hidden}
+  .bt-tag.show{visibility:visible}
+  .expr-card>div:first-child{min-width:0}
+  .expr-name,.bt-tag-label,.bt-tag-value{white-space:nowrap}
+  .expr-name{overflow:hidden;text-overflow:ellipsis}
+  .bt-tag{flex-shrink:0;margin-left:10px}
   .bt-tag-label{font-family:var(--font-mono);font-size:10px;font-weight:600;letter-spacing:1.5px;text-transform:uppercase;color:var(--text-dim)}
   .bt-tag-value{font-family:var(--font-mono);font-size:16px;font-weight:700;padding:5px 12px;border-radius:8px;background:rgba(138,182,0,0.18);color:var(--green);border:1px solid var(--green);user-select:all}
   .bt-tag.release .bt-tag-value{background:rgba(0,143,160,0.18);color:#00d4ea;border-color:var(--accent)}
@@ -112,7 +117,7 @@
   @media(max-width:600px){
     .app{padding:12px 10px 32px}.header{padding:14px 16px;gap:14px}.logo{width:52px;height:52px}.brand-name{height:26px}.brand-tagline{font-size:10px;letter-spacing:1.5px}
     .camera-wrapper{max-width:100%}.camera-container{aspect-ratio:3/4}
-    .expr-name{font-size:18px}.bt-tag-value{font-size:13px;padding:4px 9px}
+    .expr-name{font-size:15px}.bt-tag-value{font-size:12px;padding:4px 8px}.expr-card{padding:12px 14px}
     .camera-area{padding:8px}
     .expr-badges{gap:4px}.expr-badge{font-size:9px;padding:3px 7px}
   }
@@ -189,7 +194,7 @@
             </div>
             <div class="bt-tag" id="btTag">
               <div class="bt-tag-label" id="btTagLabel">Bluetooth tag</div>
-              <div class="bt-tag-value" id="btTagValue"></div>
+              <div class="bt-tag-value" id="btTagValue">neutral</div>
             </div>
           </div>
         </div>
