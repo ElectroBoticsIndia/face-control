@@ -70,6 +70,14 @@
   .expr-name{font-family:var(--font-mono);font-size:22px;font-weight:700;color:var(--text-dim);transition:color .3s;margin-top:2px}
   .expr-card.active .expr-name{color:var(--green)}
 
+  /* Live eye-openness meters */
+  .eye-levels{display:flex;flex-direction:column;gap:6px;font-family:var(--font-mono);font-size:10px;color:var(--text-dim)}
+  .eye-level{display:flex;align-items:center;gap:6px}
+  .eye-level b{width:34px;text-align:right;color:var(--text)}
+  .eye-bar{width:90px;height:6px;background:var(--surface-raised);border-radius:3px;overflow:hidden}
+  .eye-fill{height:100%;width:0;background:var(--accent);transition:width .1s}
+  .eye-fill.closed{background:var(--red)}
+
   /* Expression indicators — small badges row */
   .expr-badges{position:absolute;top:10px;left:10px;right:10px;z-index:3;display:flex;flex-wrap:wrap;gap:6px;pointer-events:none}
   .expr-badge{font-family:var(--font-mono);font-size:10px;font-weight:700;padding:4px 10px;border-radius:8px;background:rgba(10,55,58,0.7);backdrop-filter:blur(4px);color:var(--text-dim);border:1px solid var(--border);transition:all .2s;text-transform:uppercase;letter-spacing:0.5px}
@@ -180,6 +188,10 @@
               <div class="expr-state" id="exprState">Waiting…</div>
               <div class="expr-name" id="exprName">—</div>
             </div>
+            <div class="eye-levels" id="eyeLevels">
+              <div class="eye-level"><span>L-EYE</span><div class="eye-bar"><div class="eye-fill" id="eyeFillL"></div></div><b id="eyePctL">--</b></div>
+              <div class="eye-level"><span>R-EYE</span><div class="eye-bar"><div class="eye-fill" id="eyeFillR"></div></div><b id="eyePctR">--</b></div>
+            </div>
           </div>
         </div>
       </div>
@@ -261,24 +273,39 @@ const L_EYE_TOP=159, R_EYE_TOP=386;
 const NOSE_TIP=4, NOSE_BRIDGE=6;
 const LEFT_MOUTH=61, RIGHT_MOUTH=291;
 const CHIN=152, FOREHEAD=10;
-// Eye thresholds — tune these if winks aren't picked up (raise) or trigger too easily (lower)
-const EYE_CLOSED_EAR=0.18;  // eye counts as closed below this Eye Aspect Ratio
-const WINK_GAP=0.05;        // open eye must be at least this much more open than the closed one
+// Eye thresholds — given as % of the person's own normal open eye (learned automatically)
+// Raise EYE_CLOSED_PCT if closing isn't picked up; lower it if it triggers too easily.
+const EYE_CLOSED_PCT=0.70;  // eye counts as closed below 70% of its normal openness
+const WINK_GAP_PCT=0.15;    // the other eye must be at least 15% more open than the closed one
+let eyeBaseL=null, eyeBaseR=null; // learned normal open-eye EAR for user's left / right eye
 const LEFT_CHEEK=234, RIGHT_CHEEK=454;
 const LEFT_TEMPLE=127, RIGHT_TEMPLE=356;
 
 function dist2d(a,b){return Math.sqrt((a.x-b.x)**2+(a.y-b.y)**2)}
 function dist3d(a,b){return Math.sqrt((a.x-b.x)**2+(a.y-b.y)**2+(a.z-b.z)**2)}
 
-// Eye Aspect Ratio — more accurate than simple top-bottom distance
-function eyeAR(lm,p1,p2,p3,p4,p5,p6){
-  const v1=dist2d(lm[p2],lm[p6]);
-  const v2=dist2d(lm[p3],lm[p5]);
-  const h=dist2d(lm[p1],lm[p4]);
+// Distance in real pixels (landmark x/y are normalised separately by width and height,
+// so raw distances distort shapes on a 4:3 frame)
+function distPx(a,b,W,H){return Math.sqrt(((a.x-b.x)*W)**2+((a.y-b.y)*H)**2)}
+
+// Eye Aspect Ratio — vertical lid gap vs eye width, measured in pixels
+function eyeAR(lm,p1,p2,p3,p4,p5,p6,W,H){
+  const v1=distPx(lm[p2],lm[p6],W,H);
+  const v2=distPx(lm[p3],lm[p5],W,H);
+  const h=distPx(lm[p1],lm[p4],W,H);
   return(v1+v2)/(2*h);
 }
 
-function analyzeExpression(landmarks){
+// Learn the person's normal open-eye size. Only fairly-open frames update it,
+// so a held wink doesn't drag the baseline down.
+function updateBase(base,ear){
+  if(base===null)return ear;
+  if(ear>base)return base*0.9+ear*0.1;          // wider than baseline: catch up quickly
+  if(ear>base*0.85)return base*0.995+ear*0.005; // normal open: drift slowly
+  return base;                                  // closing/closed: leave alone
+}
+
+function analyzeExpression(landmarks,W,H){
   const lm=landmarks;
   const faceH=dist2d(lm[FOREHEAD],lm[CHIN]);
   if(faceH<0.01)return{}; // face too small
@@ -287,8 +314,8 @@ function analyzeExpression(landmarks){
   const mouthGap=dist2d(lm[UPPER_LIP_TOP],lm[LOWER_LIP_BOTTOM])/faceH;
 
   // Eye aspect ratios (higher = more open, lower = more closed)
-  const leftEAR=eyeAR(lm,L_EYE_P1,L_EYE_P2,L_EYE_P3,L_EYE_P4,L_EYE_P5,L_EYE_P6);
-  const rightEAR=eyeAR(lm,R_EYE_P1,R_EYE_P2,R_EYE_P3,R_EYE_P4,R_EYE_P5,R_EYE_P6);
+  const leftEAR=eyeAR(lm,L_EYE_P1,L_EYE_P2,L_EYE_P3,L_EYE_P4,L_EYE_P5,L_EYE_P6,W,H);
+  const rightEAR=eyeAR(lm,R_EYE_P1,R_EYE_P2,R_EYE_P3,R_EYE_P4,R_EYE_P5,R_EYE_P6,W,H);
 
   // Eyebrow raise: average brow-to-eye distance
   const lBrow=(dist2d(lm[L_BROW_INNER],lm[L_EYE_TOP])+dist2d(lm[L_BROW_OUTER],lm[L_EYE_TOP]))/2/faceH;
@@ -322,15 +349,25 @@ function analyzeExpression(landmarks){
   // Eyes: swap left/right to match the user's own left/right
   // (landmark set "R_EYE" 362/263 is the user's LEFT eye)
   const userLeftEAR=rightEAR, userRightEAR=leftEAR;
-  expressions.left_eye_close=userLeftEAR<EYE_CLOSED_EAR;
+  // Learn baselines only while facing the camera (turning the head squashes the eyes)
+  if(Math.abs(headTurnX)<0.1){
+    eyeBaseL=updateBase(eyeBaseL,userLeftEAR);
+    eyeBaseR=updateBase(eyeBaseR,userRightEAR);
+  }
+  // Openness as a fraction of this person's normal open eye (1.0 = fully normal)
+  const openL=eyeBaseL?userLeftEAR/eyeBaseL:1;
+  const openR=eyeBaseR?userRightEAR/eyeBaseR:1;
+  showEyeLevels(openL,openR);
+
+  expressions.left_eye_close=openL<EYE_CLOSED_PCT;
   expressions.left_eye_open=!expressions.left_eye_close;
-  expressions.right_eye_close=userRightEAR<EYE_CLOSED_EAR;
+  expressions.right_eye_close=openR<EYE_CLOSED_PCT;
   expressions.right_eye_open=!expressions.right_eye_close;
 
   // Wink = ONE eye closed while the other stays clearly open.
   // Both eyes closed together is a normal blink, so it is ignored.
-  expressions.wink_left=expressions.left_eye_close&&!expressions.right_eye_close&&(userRightEAR-userLeftEAR)>WINK_GAP;
-  expressions.wink_right=expressions.right_eye_close&&!expressions.left_eye_close&&(userLeftEAR-userRightEAR)>WINK_GAP;
+  expressions.wink_left=expressions.left_eye_close&&!expressions.right_eye_close&&(openR-openL)>WINK_GAP_PCT;
+  expressions.wink_right=expressions.right_eye_close&&!expressions.left_eye_close&&(openL-openR)>WINK_GAP_PCT;
 
   // Head turn: swap for mirrored view (user's left = camera's right)
   expressions.head_left=headTurnX>0.15;
@@ -414,7 +451,7 @@ function onResults(results){
     }
 
     // Analyze expression
-    const expr=analyzeExpression(landmarks);
+    const expr=analyzeExpression(landmarks,canvas.width,canvas.height);
     const exprName=getExpressionName(expr);
 
     // Update badges
@@ -464,6 +501,16 @@ function onResults(results){
   }
 }
 
+function showEyeLevels(l,r){
+  for(const [side,v] of [['L',l],['R',r]]){
+    const pct=Math.max(0,Math.min(1.2,v));
+    const fill=document.getElementById('eyeFill'+side);
+    fill.style.width=Math.min(100,pct*100)+'%';
+    fill.classList.toggle('closed',v<EYE_CLOSED_PCT);
+    document.getElementById('eyePct'+side).textContent=Math.round(v*100)+'%';
+  }
+}
+
 function setExprCard(state,name){
   const card=document.getElementById('exprCard');
   card.classList.remove('active','sensing');
@@ -478,6 +525,7 @@ function setExprCard(state,name){
 async function startAll(){
   if(camRunning){stopCam();return}
   log('sys','Initializing Face Mesh…');
+  eyeBaseL=null;eyeBaseR=null; // re-learn eye size for whoever is in front of the camera
 
   try{
     // Initialize FaceMesh
