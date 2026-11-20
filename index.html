@@ -77,6 +77,7 @@
   .eye-bar{width:90px;height:6px;background:var(--surface-raised);border-radius:3px;overflow:hidden}
   .eye-fill{height:100%;width:0;background:var(--accent);transition:width .1s}
   .eye-fill.closed{background:var(--red)}
+  .eye-levels.paused{opacity:.35}
 
   /* Expression indicators — small badges row */
   .expr-badges{position:absolute;top:10px;left:10px;right:10px;z-index:3;display:flex;flex-wrap:wrap;gap:6px;pointer-events:none}
@@ -279,6 +280,12 @@ const EYE_CLOSED_PCT=0.80;  // eye counts as closed below 80% of its normal open
 const EYE_REOPEN_PCT=0.85;  // ...and only counts as open again above 85% (stops flicker at the edge)
 const WINK_GAP_PCT=0.15;    // for a wink, the other eye must be at least 15% more open than the closed one
 let eyeClosedL=false, eyeClosedR=false;
+// Head thresholds
+const HEAD_TURN=0.15;        // nose offset for head left / right
+const HEAD_UP_RATIO=0.68;    // forehead-nose : nose-chin ratio below this = head up
+const HEAD_DOWN_RATIO=1.35;  // ...above this = head down
+const HEAD_SETTLE_MS=400;    // ignore eyes this long after the head stops moving
+let lastHeadMove=-1e9;
 let eyeBaseL=null, eyeBaseR=null; // learned normal open-eye EAR for user's left / right eye
 const LEFT_CHEEK=234, RIGHT_CHEEK=454;
 const LEFT_TEMPLE=127, RIGHT_TEMPLE=356;
@@ -350,9 +357,30 @@ function analyzeExpression(landmarks,W,H){
 
   // Eyes: swap left/right to match the user's own left/right
   // (landmark set "R_EYE" 362/263 is the user's LEFT eye)
+  // Head turn: swap for mirrored view (user's left = camera's right)
+  expressions.head_left=headTurnX>HEAD_TURN;
+  expressions.head_right=headTurnX<-HEAD_TURN;
+
+  // Head up/down: use ratio of forehead-to-nose vs nose-to-chin distances
+  const foreheadToNose=dist2d(lm[FOREHEAD],lm[NOSE_TIP]);
+  const noseToChin=dist2d(lm[NOSE_TIP],lm[CHIN]);
+  const verticalRatio=foreheadToNose/noseToChin;
+  expressions.head_up=verticalRatio<HEAD_UP_RATIO;
+  expressions.head_down=verticalRatio>HEAD_DOWN_RATIO;
+
+  // Is the head moving at all? Uses a softer zone than the head gestures, so eye
+  // sensing switches off as soon as the head starts to move, not only once it locks.
+  // Turning squashes the far eye and looking down narrows both eyes, so eye
+  // readings during head movement would give false winks.
+  const headMoving=Math.abs(headTurnX)>HEAD_TURN*0.65||
+                   verticalRatio<HEAD_UP_RATIO+0.07||verticalRatio>HEAD_DOWN_RATIO-0.08;
+  const now=performance.now();
+  if(headMoving)lastHeadMove=now;
+  const eyesBlocked=now-lastHeadMove<HEAD_SETTLE_MS; // also wait a moment after the head comes back
+
   const userLeftEAR=rightEAR, userRightEAR=leftEAR;
-  // Learn baselines only while facing the camera (turning the head squashes the eyes)
-  if(Math.abs(headTurnX)<0.1){
+  // Learn baselines only while facing the camera
+  if(!eyesBlocked){
     eyeBaseL=updateBase(eyeBaseL,userLeftEAR);
     eyeBaseR=updateBase(eyeBaseR,userRightEAR);
   }
@@ -360,8 +388,12 @@ function analyzeExpression(landmarks,W,H){
   const openL=eyeBaseL?userLeftEAR/eyeBaseL:1;
   const openR=eyeBaseR?userRightEAR/eyeBaseR:1;
   // Two thresholds: close below EYE_CLOSED_PCT, reopen above EYE_REOPEN_PCT
-  eyeClosedL=eyeClosedL?openL<EYE_REOPEN_PCT:openL<EYE_CLOSED_PCT;
-  eyeClosedR=eyeClosedR?openR<EYE_REOPEN_PCT:openR<EYE_CLOSED_PCT;
+  if(eyesBlocked){
+    eyeClosedL=false;eyeClosedR=false; // head is moving: ignore the eyes completely
+  }else{
+    eyeClosedL=eyeClosedL?openL<EYE_REOPEN_PCT:openL<EYE_CLOSED_PCT;
+    eyeClosedR=eyeClosedR?openR<EYE_REOPEN_PCT:openR<EYE_CLOSED_PCT;
+  }
 
   // Wink = one eye closed AND clearly more closed than the other.
   // People squint the other eye while winking, so we compare the two eyes
@@ -377,18 +409,7 @@ function analyzeExpression(landmarks,W,H){
   expressions.left_eye_open=!eyeClosedL;
   expressions.right_eye_close=eyeClosedR;
   expressions.right_eye_open=!eyeClosedR;
-  showEyeLevels(openL,openR);
-
-  // Head turn: swap for mirrored view (user's left = camera's right)
-  expressions.head_left=headTurnX>0.15;
-  expressions.head_right=headTurnX<-0.15;
-
-  // Head up/down: use ratio of forehead-to-nose vs nose-to-chin distances
-  const foreheadToNose=dist2d(lm[FOREHEAD],lm[NOSE_TIP]);
-  const noseToChin=dist2d(lm[NOSE_TIP],lm[CHIN]);
-  const verticalRatio=foreheadToNose/noseToChin;
-  expressions.head_up=verticalRatio<0.68;
-  expressions.head_down=verticalRatio>1.35;
+  showEyeLevels(openL,openR,eyesBlocked);
 
   return expressions;
 }
@@ -403,6 +424,7 @@ const GESTURES={ // detection flag → command name
   wink_left:'left_eye_close', wink_right:'right_eye_close',
   mouth_open:'mouth_open', mouth_close:'mouth_close'
 };
+const HEAD_GESTURES=['head_left','head_right','head_up','head_down'];
 const ON_FRAMES=3, OFF_FRAMES=6;
 let gState={}, currentGesture=null;
 
@@ -422,10 +444,13 @@ function getExpressionName(expr){
     if(!s.on&&s.score>=ON_FRAMES){s.on=true;s.since=now;s.usedUp=false}
     else if(s.on&&s.score===0){s.on=false;s.usedUp=false;if(currentGesture===k)currentGesture=null}
   }
-  // Newest active gesture that hasn't been replaced
+  // Head movements always win: if any head gesture is on, only head gestures compete.
+  // Otherwise the newest active gesture that hasn't been replaced wins.
+  const headOn=HEAD_GESTURES.some(k=>gState[k].on&&!gState[k].usedUp);
   let best=null;
   for(const k in GESTURES){
     const s=gState[k];
+    if(headOn&&!HEAD_GESTURES.includes(k))continue;
     if(s.on&&!s.usedUp&&(best===null||s.since>gState[best].since))best=k;
   }
   if(best!==currentGesture){
@@ -539,7 +564,9 @@ function onResults(results){
   }
 }
 
-function showEyeLevels(l,r){
+function showEyeLevels(l,r,paused){
+  // Dim the meters while eye sensing is paused for head movement
+  document.getElementById('eyeLevels').classList.toggle('paused',!!paused);
   for(const [side,v] of [['L',l],['R',r]]){
     const pct=Math.max(0,Math.min(1.2,v));
     const fill=document.getElementById('eyeFill'+side);
@@ -563,7 +590,7 @@ function setExprCard(state,name){
 async function startAll(){
   if(camRunning){stopCam();return}
   log('sys','Initializing Face Mesh…');
-  eyeBaseL=null;eyeBaseR=null;eyeClosedL=false;eyeClosedR=false;resetGestures(); // re-learn eye size for whoever is in front of the camera
+  eyeBaseL=null;eyeBaseR=null;eyeClosedL=false;eyeClosedR=false;lastHeadMove=-1e9;resetGestures(); // re-learn eye size for whoever is in front of the camera
 
   try{
     // Initialize FaceMesh
