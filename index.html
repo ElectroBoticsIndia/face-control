@@ -70,15 +70,6 @@
   .expr-name{font-family:var(--font-mono);font-size:22px;font-weight:700;color:var(--text-dim);transition:color .3s;margin-top:2px}
   .expr-card.active .expr-name{color:var(--green)}
 
-  /* Live eye-openness meters */
-  .eye-levels{display:flex;flex-direction:column;gap:6px;font-family:var(--font-mono);font-size:10px;color:var(--text-dim)}
-  .eye-level{display:flex;align-items:center;gap:6px}
-  .eye-level b{width:34px;text-align:right;color:var(--text)}
-  .eye-bar{width:90px;height:6px;background:var(--surface-raised);border-radius:3px;overflow:hidden}
-  .eye-fill{height:100%;width:0;background:var(--accent);transition:width .1s}
-  .eye-fill.closed{background:var(--red)}
-  .eye-levels.paused{opacity:.35}
-
   /* Expression indicators — small badges row */
   .expr-badges{position:absolute;top:10px;left:10px;right:10px;z-index:3;display:flex;flex-wrap:wrap;gap:6px;pointer-events:none}
   .expr-badge{font-family:var(--font-mono);font-size:10px;font-weight:700;padding:4px 10px;border-radius:8px;background:rgba(10,55,58,0.7);backdrop-filter:blur(4px);color:var(--text-dim);border:1px solid var(--border);transition:all .2s;text-transform:uppercase;letter-spacing:0.5px}
@@ -188,10 +179,6 @@
             <div>
               <div class="expr-state" id="exprState">Waiting…</div>
               <div class="expr-name" id="exprName">—</div>
-            </div>
-            <div class="eye-levels" id="eyeLevels">
-              <div class="eye-level"><span>L-EYE</span><div class="eye-bar"><div class="eye-fill" id="eyeFillL"></div></div><b id="eyePctL">--</b></div>
-              <div class="eye-level"><span>R-EYE</span><div class="eye-bar"><div class="eye-fill" id="eyeFillR"></div></div><b id="eyePctR">--</b></div>
             </div>
           </div>
         </div>
@@ -409,7 +396,6 @@ function analyzeExpression(landmarks,W,H){
   expressions.left_eye_open=!eyeClosedL;
   expressions.right_eye_close=eyeClosedR;
   expressions.right_eye_open=!eyeClosedR;
-  showEyeLevels(openL,openR,eyesBlocked);
 
   return expressions;
 }
@@ -561,18 +547,6 @@ function onResults(results){
     document.querySelectorAll('.expr-badge').forEach(b=>b.classList.remove('on'));
     candidateExpr=null;exprSent=false;lowFaceCount=0;
     resetGestures();
-  }
-}
-
-function showEyeLevels(l,r,paused){
-  // Dim the meters while eye sensing is paused for head movement
-  document.getElementById('eyeLevels').classList.toggle('paused',!!paused);
-  for(const [side,v] of [['L',l],['R',r]]){
-    const pct=Math.max(0,Math.min(1.2,v));
-    const fill=document.getElementById('eyeFill'+side);
-    fill.style.width=Math.min(100,pct*100)+'%';
-    fill.classList.toggle('closed',side==='L'?eyeClosedL:eyeClosedR);
-    document.getElementById('eyePct'+side).textContent=Math.round(v*100)+'%';
   }
 }
 
