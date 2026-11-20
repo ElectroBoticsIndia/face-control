@@ -167,6 +167,10 @@
           <div class="expr-badge" id="badge-head_right">H-Right</div>
           <div class="expr-badge" id="badge-head_up">H-Up</div>
           <div class="expr-badge" id="badge-head_down">H-Down</div>
+          <div class="expr-badge" id="badge-left_eye_open">LE-Open</div>
+          <div class="expr-badge" id="badge-left_eye_close">LE-Close</div>
+          <div class="expr-badge" id="badge-right_eye_open">RE-Open</div>
+          <div class="expr-badge" id="badge-right_eye_close">RE-Close</div>
         </div>
 
         <!-- Main expression overlay -->
@@ -257,6 +261,9 @@ const L_EYE_TOP=159, R_EYE_TOP=386;
 const NOSE_TIP=4, NOSE_BRIDGE=6;
 const LEFT_MOUTH=61, RIGHT_MOUTH=291;
 const CHIN=152, FOREHEAD=10;
+// Eye thresholds — tune these if winks aren't picked up (raise) or trigger too easily (lower)
+const EYE_CLOSED_EAR=0.18;  // eye counts as closed below this Eye Aspect Ratio
+const WINK_GAP=0.05;        // open eye must be at least this much more open than the closed one
 const LEFT_CHEEK=234, RIGHT_CHEEK=454;
 const LEFT_TEMPLE=127, RIGHT_TEMPLE=356;
 
@@ -312,9 +319,18 @@ function analyzeExpression(landmarks){
   expressions.mouth_open=mouthGap>0.07;
   expressions.mouth_close=mouthGap<0.008; // very tight threshold — only deliberate lip press
 
-  // Eyes closed: swap left/right to match mirrored user perspective
-  expressions.left_eye_closed=rightEAR<0.18;   // camera's right = user's left
-  expressions.right_eye_closed=leftEAR<0.18;   // camera's left = user's right
+  // Eyes: swap left/right to match the user's own left/right
+  // (landmark set "R_EYE" 362/263 is the user's LEFT eye)
+  const userLeftEAR=rightEAR, userRightEAR=leftEAR;
+  expressions.left_eye_close=userLeftEAR<EYE_CLOSED_EAR;
+  expressions.left_eye_open=!expressions.left_eye_close;
+  expressions.right_eye_close=userRightEAR<EYE_CLOSED_EAR;
+  expressions.right_eye_open=!expressions.right_eye_close;
+
+  // Wink = ONE eye closed while the other stays clearly open.
+  // Both eyes closed together is a normal blink, so it is ignored.
+  expressions.wink_left=expressions.left_eye_close&&!expressions.right_eye_close&&(userRightEAR-userLeftEAR)>WINK_GAP;
+  expressions.wink_right=expressions.right_eye_close&&!expressions.left_eye_close&&(userLeftEAR-userRightEAR)>WINK_GAP;
 
   // Head turn: swap for mirrored view (user's left = camera's right)
   expressions.head_left=headTurnX>0.15;
@@ -333,11 +349,13 @@ function analyzeExpression(landmarks){
 function getExpressionName(expr){
   if(!expr||Object.keys(expr).length===0)return 'neutral';
 
-  // Priority: head movements first, then mouth (deliberate actions only)
+  // Priority: head movements first, then eyes, then mouth (deliberate actions only)
   if(expr.head_left) return 'head_left';
   if(expr.head_right) return 'head_right';
   if(expr.head_up) return 'head_up';
   if(expr.head_down) return 'head_down';
+  if(expr.wink_left) return 'left_eye_close';
+  if(expr.wink_right) return 'right_eye_close';
   if(expr.mouth_open) return 'mouth_open';
   if(expr.mouth_close) return 'mouth_close';
   return 'neutral';
@@ -347,8 +365,13 @@ function getExpressionName(expr){
 const BADGE_MAP={
   'mouth_open':'mouth_open', 'mouth_close':'mouth_close',
   'head_left':'head_left', 'head_right':'head_right',
-  'head_up':'head_up', 'head_down':'head_down'
+  'head_up':'head_up', 'head_down':'head_down',
+  'left_eye_open':'left_eye_open', 'left_eye_close':'left_eye_close',
+  'right_eye_open':'right_eye_open', 'right_eye_close':'right_eye_close'
 };
+
+// When a locked eye-close ends, send the matching "open" instead of "neutral"
+const RELEASE_MSG={left_eye_close:'left_eye_open', right_eye_close:'right_eye_open'};
 
 // Stabilization
 let candidateExpr=null, candidateStart=0, exprSent=false, lowFaceCount=0;
@@ -407,6 +430,8 @@ function onResults(results){
     // Stabilization + auto-send
     if(exprName!=='neutral'){
       if(exprName!==candidateExpr){
+        // If we were locked on an eye-close and that eye has now opened, report it
+        if(exprSent&&txChar&&RELEASE_MSG[candidateExpr]&&expr[RELEASE_MSG[candidateExpr]])sendBLE(RELEASE_MSG[candidateExpr]);
         candidateExpr=exprName;
         candidateStart=Date.now();
         exprSent=false;
@@ -425,12 +450,11 @@ function onResults(results){
       lowFaceCount++;
       if(lowFaceCount>10){
         if(candidateExpr!==null&&candidateExpr!=='neutral'){
-          if(exprSent&&txChar){sendBLE('neutral')}
+          if(exprSent&&txChar){sendBLE(RELEASE_MSG[candidateExpr]||'neutral')}
           candidateExpr=null;candidateStart=0;exprSent=false;
         }
         setExprCard('waiting','neutral');
         lowFaceCount=0;
-        document.querySelectorAll('.expr-badge').forEach(b=>b.classList.remove('on'));
       }
     }
   }else{
