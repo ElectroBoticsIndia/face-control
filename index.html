@@ -276,8 +276,8 @@ const CHIN=152, FOREHEAD=10;
 // Eye thresholds — given as % of the person's own normal open eye (learned automatically)
 // Raise EYE_CLOSED_PCT if closing isn't picked up; lower it if it triggers too easily.
 const EYE_CLOSED_PCT=0.80;  // eye counts as closed below 80% of its normal openness
-const EYE_REOPEN_PCT=0.88;  // ...and only counts as open again above 88% (stops flicker at the edge)
-const WINK_GAP_PCT=0.10;    // the other eye must be at least 10% more open than the closed one
+const EYE_REOPEN_PCT=0.85;  // ...and only counts as open again above 85% (stops flicker at the edge)
+const WINK_GAP_PCT=0.15;    // for a wink, the other eye must be at least 15% more open than the closed one
 let eyeClosedL=false, eyeClosedR=false;
 let eyeBaseL=null, eyeBaseR=null; // learned normal open-eye EAR for user's left / right eye
 const LEFT_CHEEK=234, RIGHT_CHEEK=454;
@@ -359,20 +359,25 @@ function analyzeExpression(landmarks,W,H){
   // Openness as a fraction of this person's normal open eye (1.0 = fully normal)
   const openL=eyeBaseL?userLeftEAR/eyeBaseL:1;
   const openR=eyeBaseR?userRightEAR/eyeBaseR:1;
-  showEyeLevels(openL,openR);
-
   // Two thresholds: close below EYE_CLOSED_PCT, reopen above EYE_REOPEN_PCT
   eyeClosedL=eyeClosedL?openL<EYE_REOPEN_PCT:openL<EYE_CLOSED_PCT;
   eyeClosedR=eyeClosedR?openR<EYE_REOPEN_PCT:openR<EYE_CLOSED_PCT;
-  expressions.left_eye_close=eyeClosedL;
-  expressions.left_eye_open=!expressions.left_eye_close;
-  expressions.right_eye_close=eyeClosedR;
-  expressions.right_eye_open=!expressions.right_eye_close;
 
-  // Wink = ONE eye closed while the other stays clearly open.
-  // Both eyes closed together is a normal blink, so it is ignored.
-  expressions.wink_left=expressions.left_eye_close&&!expressions.right_eye_close&&(openR-openL)>WINK_GAP_PCT;
-  expressions.wink_right=expressions.right_eye_close&&!expressions.left_eye_close&&(openL-openR)>WINK_GAP_PCT;
+  // Wink = one eye closed AND clearly more closed than the other.
+  // People squint the other eye while winking, so we compare the two eyes
+  // instead of requiring the other eye to be fully open.
+  // A normal blink closes both eyes about equally, so the gap stays small → ignored.
+  expressions.wink_left=eyeClosedL&&(openR-openL)>WINK_GAP_PCT;
+  expressions.wink_right=eyeClosedR&&(openL-openR)>WINK_GAP_PCT;
+  // During a wink the other (squinting) eye still counts as open
+  if(expressions.wink_left)eyeClosedR=false;
+  if(expressions.wink_right)eyeClosedL=false;
+
+  expressions.left_eye_close=eyeClosedL;
+  expressions.left_eye_open=!eyeClosedL;
+  expressions.right_eye_close=eyeClosedR;
+  expressions.right_eye_open=!eyeClosedR;
+  showEyeLevels(openL,openR);
 
   // Head turn: swap for mirrored view (user's left = camera's right)
   expressions.head_left=headTurnX>0.15;
